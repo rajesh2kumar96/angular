@@ -9,8 +9,8 @@
 import {PullsListCommitsResponse, PullsMergeParams} from '@octokit/rest';
 import {prompt} from 'inquirer';
 
-import {parseCommitMessage} from '../../../commit-message/validate';
-import {GitClient} from '../../../utils/git';
+import {parseCommitMessage} from '../../../commit-message/parse';
+import {GitClient} from '../../../utils/git/index';
 import {GithubApiMergeMethod} from '../config';
 import {PullRequestFailure} from '../failures';
 import {PullRequest} from '../pull-request';

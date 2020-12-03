@@ -6,16 +6,16 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {isPromise} from '../src/util/lang';
-
 import {Inject, Injectable, InjectionToken, Optional} from './di';
+import {isPromise} from './util/lang';
+import {noop} from './util/noop';
 
 
 /**
  * A [DI token](guide/glossary#di-token "DI token definition") that you can use to provide
  * one or more initialization functions.
  *
- * The provided function are injected at application startup and executed during
+ * The provided functions are injected at application startup and executed during
  * app initialization. If any of these functions returns a Promise, initialization
  * does not complete until the Promise is resolved.
  *
@@ -37,10 +37,8 @@ export const APP_INITIALIZER = new InjectionToken<Array<() => void>>('Applicatio
  */
 @Injectable()
 export class ApplicationInitStatus {
-  // TODO(issue/24571): remove '!'.
-  private resolve!: Function;
-  // TODO(issue/24571): remove '!'.
-  private reject!: Function;
+  private resolve = noop;
+  private reject = noop;
   private initialized = false;
   public readonly donePromise: Promise<any>;
   public readonly done = false;

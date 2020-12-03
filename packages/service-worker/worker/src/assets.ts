@@ -9,7 +9,7 @@
 import {Adapter, Context} from './adapter';
 import {CacheState, NormalizedUrl, UpdateCacheStatus, UpdateSource, UrlMetadata} from './api';
 import {Database, Table} from './database';
-import {errorToString, SwCriticalError} from './error';
+import {errorToString, SwCriticalError, SwUnrecoverableStateError} from './error';
 import {IdleScheduler} from './idle';
 import {AssetGroupConfig} from './manifest';
 import {sha1Binary} from './sha1';
@@ -145,6 +145,7 @@ export abstract class AssetGroup {
           return cachedResponse;
         }
       }
+
       // No already-cached response exists, so attempt a fetch/cache operation. The original request
       // may specify things like credential inclusion, but for assets these are not honored in order
       // to avoid issues with opaque responses. The SW requests the data itself.
@@ -387,18 +388,17 @@ export abstract class AssetGroup {
       // a stale response.
 
       // Fetch the resource from the network (possibly hitting the HTTP cache).
-      const networkResult = await this.safeFetch(req);
+      let response = await this.safeFetch(req);
 
-      // Decide whether a cache-busted request is necessary. It might be for two independent
-      // reasons: either the non-cache-busted request failed (hopefully transiently) or if the
-      // hash of the content retrieved does not match the canonical hash from the manifest. It's
-      // only valid to access the content of the first response if the request was successful.
-      let makeCacheBustedRequest: boolean = networkResult.ok;
+      // Decide whether a cache-busted request is necessary. A cache-busted request is necessary
+      // only if the request was successful but the hash of the retrieved contents does not match
+      // the canonical hash from the manifest.
+      let makeCacheBustedRequest = response.ok;
       if (makeCacheBustedRequest) {
         // The request was successful. A cache-busted request is only necessary if the hashes
-        // don't match. Compare them, making sure to clone the response so it can be used later
-        // if it proves to be valid.
-        const fetchedHash = sha1Binary(await networkResult.clone().arrayBuffer());
+        // don't match.
+        // (Make sure to clone the response so it can be used later if it proves to be valid.)
+        const fetchedHash = sha1Binary(await response.clone().arrayBuffer());
         makeCacheBustedRequest = (fetchedHash !== canonicalHash);
       }
 
@@ -410,33 +410,34 @@ export abstract class AssetGroup {
         // request will differentiate these two situations.
         // TODO: handle case where the URL has parameters already (unlikely for assets).
         const cacheBustReq = this.adapter.newRequest(this.cacheBust(req.url));
-        const cacheBustedResult = await this.safeFetch(cacheBustReq);
+        response = await this.safeFetch(cacheBustReq);
 
-        // If the response was unsuccessful, there's nothing more that can be done.
-        if (!cacheBustedResult.ok) {
-          throw new SwCriticalError(
-              `Response not Ok (cacheBustedFetchFromNetwork): cache busted request for ${
-                  req.url} returned response ${cacheBustedResult.status} ${
-                  cacheBustedResult.statusText}`);
+        // If the response was successful, check the contents against the canonical hash.
+        if (response.ok) {
+          // Hash the contents.
+          // (Make sure to clone the response so it can be used later if it proves to be valid.)
+          const cacheBustedHash = sha1Binary(await response.clone().arrayBuffer());
+
+          // If the cache-busted version doesn't match, then the manifest is not an accurate
+          // representation of the server's current set of files, and the SW should give up.
+          if (canonicalHash !== cacheBustedHash) {
+            throw new SwCriticalError(`Hash mismatch (cacheBustedFetchFromNetwork): ${
+                req.url}: expected ${canonicalHash}, got ${cacheBustedHash} (after cache busting)`);
+          }
         }
-
-        // Hash the contents.
-        const cacheBustedHash = sha1Binary(await cacheBustedResult.clone().arrayBuffer());
-
-        // If the cache-busted version doesn't match, then the manifest is not an accurate
-        // representation of the server's current set of files, and the SW should give up.
-        if (canonicalHash !== cacheBustedHash) {
-          throw new SwCriticalError(`Hash mismatch (cacheBustedFetchFromNetwork): ${
-              req.url}: expected ${canonicalHash}, got ${cacheBustedHash} (after cache busting)`);
-        }
-
-        // If it does match, then use the cache-busted result.
-        return cacheBustedResult;
       }
 
-      // Excellent, the version from the network matched on the first try, with no need for
-      // cache-busting. Use it.
-      return networkResult;
+      // At this point, `response` is either successful with a matching hash or is unsuccessful.
+      // Before returning it, check whether it failed with a 404 status. This would signify an
+      // unrecoverable state.
+      if (!response.ok && (response.status === 404)) {
+        throw new SwUnrecoverableStateError(
+            `Failed to retrieve hashed resource from the server. (AssetGroup: ${
+                this.config.name} | URL: ${url})`);
+      }
+
+      // Return the response (successful or unsuccessful).
+      return response;
     } else {
       // This URL doesn't exist in our hash database, so it must be requested directly.
       return this.safeFetch(req);

@@ -96,6 +96,50 @@ describe('component', () => {
     expect(fixture.nativeElement).toHaveText('foo|bar');
   });
 
+  it('should be able to dynamically insert a component into a view container at the root of a component',
+     () => {
+       @Component({template: 'hello'})
+       class HelloComponent {
+       }
+
+       // TODO: This module is only used to declare the `entryComponets` since
+       //  `configureTestingModule` doesn't support it. The module can be removed
+       // once ViewEngine is removed.
+       @NgModule({
+         declarations: [HelloComponent],
+         exports: [HelloComponent],
+         entryComponents: [HelloComponent]
+       })
+       class HelloModule {
+       }
+
+       @Component({selector: 'wrapper', template: '<ng-content></ng-content>'})
+       class Wrapper {
+       }
+
+       @Component({
+         template: `
+            <wrapper>
+              <div #insertionPoint></div>
+            </wrapper>
+          `
+       })
+       class App {
+         @ViewChild('insertionPoint', {read: ViewContainerRef}) viewContainerRef!: ViewContainerRef;
+         constructor(public componentFactoryResolver: ComponentFactoryResolver) {}
+       }
+
+       TestBed.configureTestingModule({declarations: [App, Wrapper], imports: [HelloModule]});
+       const fixture = TestBed.createComponent(App);
+       fixture.detectChanges();
+
+       const instance = fixture.componentInstance;
+       const factory = instance.componentFactoryResolver.resolveComponentFactory(HelloComponent);
+       instance.viewContainerRef.createComponent(factory);
+
+       expect(fixture.nativeElement.textContent.trim()).toBe('hello');
+     });
+
   // TODO: add tests with Native once tests run in real browser (domino doesn't support shadow root)
   describe('encapsulation', () => {
     @Component({
@@ -258,6 +302,57 @@ describe('component', () => {
        const wrapperEls = fixture.nativeElement.querySelectorAll('.wrapper');
        expect(wrapperEls.length).toBe(2);  // other elements are preserved
      });
+
+  it('should invoke `onDestroy` callbacks of dynamically created component', () => {
+    let wasOnDestroyCalled = false;
+    @Component({
+      selector: '[comp]',
+      template: 'comp content',
+    })
+    class DynamicComponent {
+    }
+
+    @NgModule({
+      declarations: [DynamicComponent],
+      entryComponents: [DynamicComponent],  // needed only for ViewEngine
+    })
+    class TestModule {
+    }
+
+    @Component({
+      selector: 'button',
+      template: '<div id="app-root" #anchor></div>',
+    })
+    class App {
+      @ViewChild('anchor', {read: ViewContainerRef}) anchor!: ViewContainerRef;
+
+      constructor(private cfr: ComponentFactoryResolver, private injector: Injector) {}
+
+      create() {
+        const factory = this.cfr.resolveComponentFactory(DynamicComponent);
+        const componentRef = factory.create(this.injector);
+        componentRef.onDestroy(() => {
+          wasOnDestroyCalled = true;
+        });
+        this.anchor.insert(componentRef.hostView);
+      }
+
+      clear() {
+        this.anchor.clear();
+      }
+    }
+
+    TestBed.configureTestingModule({imports: [TestModule], declarations: [App]});
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+
+    // Add ComponentRef to ViewContainerRef instance.
+    fixture.componentInstance.create();
+    // Clear ViewContainerRef to invoke `onDestroy` callbacks on ComponentRef.
+    fixture.componentInstance.clear();
+
+    expect(wasOnDestroyCalled).toBeTrue();
+  });
 
   describe('invalid host element', () => {
     it('should throw when <ng-container> is used as a host element for a Component', () => {

@@ -6,11 +6,13 @@
  * found in the LICENSE file at https://angular.io/license
  */
 
-import {SchemaMetadata, ViewEncapsulation} from '../../core';
 import {ProcessProvidersFunction} from '../../di/interface/provider';
 import {Type} from '../../interface/type';
+import {SchemaMetadata} from '../../metadata/schema';
+import {ViewEncapsulation} from '../../metadata/view';
+import {FactoryFn} from '../definition_factory';
 
-import {TAttributes, TConstants} from './node';
+import {TAttributes, TConstantsOrFactory} from './node';
 import {CssSelectorList} from './projection';
 import {TView} from './view';
 
@@ -35,22 +37,6 @@ export type ViewQueriesFunction<T> = <U extends T>(rf: RenderFlags, ctx: U) => v
  */
 export type ContentQueriesFunction<T> =
     <U extends T>(rf: RenderFlags, ctx: U, directiveIndex: number) => void;
-
-/**
- * Definition of what a factory function should look like.
- */
-export type FactoryFn<T> = {
-  /**
-   * Subclasses without an explicit constructor call through to the factory of their base
-   * definition, providing it with their own constructor to instantiate.
-   */
-  <U extends T>(t: Type<U>): U;
-
-  /**
-   * If no constructor to instantiate is provided, an instance of type T itself is created.
-   */
-  (t?: undefined): T;
-};
 
 /**
  * Flags passed into template functions to determine which blocks (i.e. creation, update)
@@ -299,7 +285,7 @@ export interface ComponentDef<T> extends DirectiveDef<T> {
   readonly template: ComponentTemplate<T>;
 
   /** Constants associated with the component's view. */
-  readonly consts: TConstants|null;
+  readonly consts: TConstantsOrFactory|null;
 
   /**
    * An array of `ngContent[selector]` values that were found in the template.
